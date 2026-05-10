@@ -1,0 +1,46 @@
+# ── Stage 1: Builder ──────────────────────────────────────────────────────────
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+
+# System deps for compiled packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install --prefix=/install --no-cache-dir -r requirements.txt
+
+
+# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+LABEL org.opencontainers.image.title="Agentic AI Platform Backend"
+LABEL org.opencontainers.image.version="1.0.0"
+
+WORKDIR /app
+
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
+
+# Non-root user for security
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+
+COPY apps/ apps/
+COPY ai/ ai/
+
+RUN chown -R appuser:appgroup /app
+USER appuser
+
+EXPOSE 8000
+
+# Uvicorn with multiple workers for production
+CMD ["uvicorn", "apps.backend.api.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "2", \
+     "--loop", "uvloop", \
+     "--http", "httptools", \
+     "--access-log", \
+     "--log-level", "info"]
